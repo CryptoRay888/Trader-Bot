@@ -1,7 +1,7 @@
 import asyncio,logging,time
 from fastapi import FastAPI
 import uvicorn
-from coinbase.rest import RESTClient
+import httpx
 from .config import Settings
 from .models import MarketState
 from .market import CoinbaseStream,BinanceDerivatives,open_interest
@@ -17,10 +17,12 @@ def health():return {'status':latest['status'],'mode':'live' if s.live_enabled e
 @app.get('/state')
 def state_api():return {'latest':latest,'market':state.__dict__,'paper_position':paper.position}
 async def candles():
- c=RESTClient()
  while True:
   try:
-   e=int(time.time());r=c.get_candles(product_id=s.symbol,start=str(e-3600),end=str(e),granularity='ONE_MINUTE',limit=300);rows=getattr(r,'candles',[]);state.candles=sorted([[int(x.start),float(x.open),float(x.high),float(x.low),float(x.close),float(x.volume)] for x in rows])[-300:]
+   e=int(time.time());start=e-3600
+   async with httpx.AsyncClient(timeout=5) as client:
+    r=await client.get('https://fapi.binance.com/fapi/v1/klines',params={'symbol':s.binance_symbol,'interval':'1m','startTime':start*1000,'endTime':e*1000,'limit':300});r.raise_for_status()
+   state.candles=sorted([[int(x[0]//1000),float(x[1]),float(x[2]),float(x[3]),float(x[4]),float(x[5])] for x in r.json()])[-300:]
   except Exception as ex:log.warning('candles: %s',ex)
   await asyncio.sleep(30)
 async def oi():
